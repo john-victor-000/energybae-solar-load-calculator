@@ -35,7 +35,7 @@ energybae-ai/
 ├── .env
 │
 ├── templates/
-│   └── Pranay HOME E-Bill Analysis.xlsx
+│   └── E-Bill Analysis.xlsx
 │
 ├── uploads/
 ├── outputs/
