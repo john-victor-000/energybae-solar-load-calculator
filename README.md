@@ -33,6 +33,7 @@ energybae-ai/
 ├── app.py
 ├── requirements.txt
 ├── .env
+├── Demo Video
 │
 ├── templates/
 │   └── E-Bill Analysis.xlsx
