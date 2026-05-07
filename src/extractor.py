@@ -2,13 +2,16 @@ import google.generativeai as genai
 import json
 import os
 import re
-from dotenv import load_dotenv
 from PIL import Image
 import fitz  # PyMuPDF
 
-load_dotenv()
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
+API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not API_KEY:
+    raise ValueError("GEMINI_API_KEY not found. Add it in Hugging Face Secrets.")
+
+genai.configure(api_key=API_KEY)
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 
@@ -17,17 +20,21 @@ def pdf_to_image(pdf_path):
     Convert first page PDF -> PIL Image
     """
     doc = fitz.open(pdf_path)
-    page = doc.load_page(0)
 
-    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+    try:
+        page = doc.load_page(0)
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
 
-    img = Image.frombytes(
-        "RGB",
-        [pix.width, pix.height],
-        pix.samples
-    )
+        img = Image.frombytes(
+            "RGB",
+            [pix.width, pix.height],
+            pix.samples
+        )
 
-    return img
+        return img
+
+    finally:
+        doc.close()
 
 
 def load_bill(file_path):
@@ -39,17 +46,12 @@ def load_bill(file_path):
     if ext == "pdf":
         return pdf_to_image(file_path)
 
-    return Image.open(file_path)
+    return Image.open(file_path).convert("RGB")
 
 
 def clean_number(value, default=0):
     """
-    Convert messy Gemini numeric output safely.
-    Examples:
-    ₹1,460 -> 1460
-    3.30 KW -> 3.30
-    "" -> 0
-    None -> 0
+    Convert messy Gemini numeric output safely
     """
     if value is None:
         return default
@@ -111,19 +113,17 @@ Rules:
 - Missing numeric values -> 0
 """
 
-    response = model.generate_content([prompt, image])
-
-    text = response.text.strip()
-
-    # remove markdown formatting
-    text = text.replace("```json", "")
-    text = text.replace("```", "")
-    text = text.strip()
-
     try:
+        response = model.generate_content([prompt, image])
+        text = response.text.strip()
+
+        text = text.replace("```json", "")
+        text = text.replace("```", "")
+        text = text.strip()
+
         data = json.loads(text)
+
     except Exception:
-        # fallback structure
         data = {
             "consumer_name": "",
             "consumer_number": "",
@@ -134,16 +134,24 @@ Rules:
             "monthly_units": [0] * 12
         }
 
-    # normalize numbers safely
-    data["fixed_charges"] = clean_number(data.get("fixed_charges"))
+    # normalize values
+    data["latest_bill_amount"] = clean_number(
+        data.get("latest_bill_amount")
+    )
+
+    data["fixed_charges"] = clean_number(
+        data.get("fixed_charges")
+    )
 
     if data["fixed_charges"] == 0:
         data["fixed_charges"] = round(
-            clean_number(data.get("latest_bill_amount")) * 0.04,
+            data["latest_bill_amount"] * 0.04,
             2
         )
-    data["latest_bill_amount"] = clean_number(data.get("latest_bill_amount"))
-    data["sanctioned_load"] = clean_number(data.get("sanctioned_load"))
+
+    data["sanctioned_load"] = clean_number(
+        data.get("sanctioned_load")
+    )
 
     # normalize monthly units
     monthly = data.get("monthly_units", [])
@@ -156,9 +164,8 @@ Rules:
         except Exception:
             cleaned_monthly.append(0)
 
-    # ensure exactly 12 months
-    if len(cleaned_monthly) < 12:
-        cleaned_monthly = ([0] * (12 - len(cleaned_monthly))) + cleaned_monthly
+    while len(cleaned_monthly) < 12:
+        cleaned_monthly.insert(0, 0)
 
     cleaned_monthly = cleaned_monthly[:12]
 
